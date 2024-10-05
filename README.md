@@ -23,11 +23,8 @@ Compare the accuracy of the models in the two cases using 10-fold cross validati
  
 5.	Given a Bayesian network as in the below figure 
 
- BTNL9 ----> CD300LG ----> class ----> IGSF10 
- |                                        |
- |                                        |
-  ---------------> ABCA9 <----------------
-                           
+ ABCA9 <---- BTNL9 ----> CD300LG ----> class ----> IGSF10 -----> ABCA9
+ 
 a)	Construct the conditional probability tables for the Bayesian network based on data. 
 b)	Estimate the probability of the four genes in the network having high expression levels. 
 c)	Estimate the probability of having cancer when the expression level of CD300LG is high and the expression level of BTNL9 is low. 
