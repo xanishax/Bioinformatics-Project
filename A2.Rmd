@@ -1,0 +1,682 @@
+---
+title: "Bioinformatics Project"
+subtitle: "Advanced Analytic Techniques, Assignment 2"
+author: "Anisha Mariam Abraham - 110416080"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+## Initial Set-up
+
+The required packages and libraries are installed to setup the working environment.
+
+```{r}
+install.packages("rmarkdown")
+install.packages("tinytex")
+tinytex::install_tinytex(force = TRUE) # install TinyTeX to generate PDF reports
+```
+
+```{r}
+if (!requireNamespace("BiocManager", quietly = TRUE))
+install.packages("BiocManager")
+BiocManager::install(c("graph", "RBGL", "Rgraphviz"))
+install.packages("pcalg")
+```
+```{r}
+library(pcalg)
+library(dplyr)
+library(bnlearn)
+library(ppcor)
+library(gRain)
+library(caret)
+library(e1071)
+```
+
+## Introduction the BRCA-50 Dataset
+
+The BRCA-50 dataset is a comprehensive resource designed to aid in the study of breast cancer. It contains detailed information about the expression levels of 50 critical genes associated with breast cancer. This dataset is instrumental for researchers aiming to understand the role of these genes in the disease and how their expression varies between cancerous and normal tissues.
+
+The dataset includes a total of 1,212 samples. Among these, 112 samples are from normal cases, labeled as 'N', and 1,100 samples are from cancer patients, labeled as 'C'. Each sample provides expression levels for 50 different genes, including notable ones such as FIGF, LYVE1, and CD300LG. These genes have been identified as important in breast cancer research due to their potential roles in the disease.
+
+In terms of data format, each row in the dataset represents a sample, and each column corresponds to the expression level of one of the 50 genes. Additionally, there is a column indicating the class label of each sample—whether it is from a normal case or a cancer patient.
+
+```{r}
+# Read the CSV file into a data frame
+brcaData <- read.csv("BRCA_RNASeqv2_top50.csv", header = TRUE, sep = ",", stringsAsFactors = FALSE)
+
+# Display few rows of data frame
+head(brcaData)
+```
+## Question 1
+
+Use a causal structure learning algorithm to find the gene regulatory network, i.e. the
+network showing the interactions between genes, using the gene expression data.
+Explain how the algorithm works.
+
+## Answer:
+
+A gene regulatory network is a map that shows how different genes interact with each other. For example, it might show which genes influence the expression of other genes. Understanding these interactions helps researchers learn more about how genes control each other and how they contribute to diseases like cancer. The **PC (Peter-Clark) algorithm** is a method used to discover causal relationships between variables, such as genes, based on statistical data.
+
+Working of PC Algorithm can be explained using an example from the dataset. Let’s consider three genes - **FIGF**, **MYOM1**, **ARHGAP20** and **EBF1**.
+
+Input: **FIGF**, **MYOM1**, **ARHGAP20** and **EBF1**, connected graph.
+
+Output: Undirected graph with a set of edges.
+
+### depth d = 0
+
+**Step 1: Create an Initial Network**
+
+The PC algorithm starts by assuming that depth **d=0** and all genes are connected to each other. This is called the initial network. At this point, the network is fully connected, meaning that every gene is thought to potentially influence every other gene.
+
+![](IMG_A35968D55CBA-1.jpeg)
+
+
+**Step 2: Find Conditional Independence**
+
+The key idea of the PC algorithm is to test whether the relationship between two genes (**X & Y**) is influenced by other genes. This is called conditional independence. In simple terms, if the expression of gene A does not affect the expression of gene B once you account for gene C (**Z**), then A and B are not directly connected in the final network. **Z** is equal to **d** so in this iteration, **Z = 0**. 
+
+```{r}
+cor(brcaData[, c("FIGF", "EBF1", "MYOM1", "ARHGAP20")])
+```
+*FIGF* & *EBF1* : Strong relation
+
+*FIGF* & *ARHGAP20*: Strong relation
+
+*FIGF* & *MYOM1*: Weak relation
+
+*EBF1* & *MYOM1*: Weak relation
+
+*EBF1* & *ARHGAP20*: Strong relation
+
+*ARHGAP20* & *MYOM1*: Weak relation
+
+
+**Step 3: Remove Unnecessary Connections**
+
+Based on the tests of conditional independence, the algorithm removes edges (connections) between genes (**X & Y**) that are not directly influencing each other. Here, gene FIGF does not affect gene MYOM1, the direct link between FIGF and MYOM1 is removed. Gene EBF1 does not affect gene MYOM1, the direct link between EBF1 and MYOM1 is removed. Gene ARHGAP20 does not affect gene MYOM1, the direct link between ARHGAP20 and MYOM1 is removed. Rest of the genes have an influence so the direct links are maintained.
+
+**I(FIGF, EBF1) ?** No
+
+**I(FIGF, ARHGAP20) ?** No
+
+**I(FIGF, MYOM1) ?** Yes
+
+**I(EBF1, MYOM1) ?** Yes
+
+**I(EBF1, ARHGAP20) ?** No
+
+**I(ARHGAP20, MYOM1) ?** Yes
+
+
+![](IMG_A35968D55CBA-2.jpeg)
+
+We complete a single depth level until every pair of adjacent vertices X and Y in G have been considered.
+
+### depth d = 1
+
+**Z = d = 1** so repeat the conditional independence test, this time for two genes, controlling the third gene.
+
+```{r}
+# Calculate partial correlation
+# I(FIGF, EBF1|ARHGAP20) - low 
+pcor.test(brcaData$FIGF, brcaData$EBF1, brcaData$ARHGAP20)
+```
+The estimate shows a weak relation so independence **I(FIGF, EBF1|ARHGAP20) = Yes** so remove the link.
+
+```{r}
+# I(FIGF, ARHGAP20|EBF1) - low
+pcor.test(brcaData$FIGF, brcaData$ARHGAP20, brcaData$EBF1)
+```
+The estimate shows a weak relation so independence **I(FIGF, ARHGAP20|EBF1) = Yes** so remove the link.
+
+```{r}
+# I(EBF1, ARHGAP20|FIGF) - high 
+pcor.test(brcaData$EBF1, brcaData$ARHGAP20, brcaData$FIGF)
+```
+The estimate shows a strong relation so independence **I(EBF1, ARHGAP20|FIGF) = No** so keep the link.
+
+![](IMG_A35968D55CBA-3.jpeg)
+
+### depth d = 2
+
+**Z = d = 2** so repeat the conditional independence test, this time for three genes, controlling the fourth gene. But we only have existing direct link between *two* nodes. There is no subset with 2 nodes so we have to stop the iterations now.
+
+After all iterations, we end up with a simplified network showing the direct interactions between genes. This network represents how genes regulate each other based on the data.
+
+To orientate the edges, assume there is a gene with an edge directed to **ARHGAP20**. If there is a chain X~i~ -> X~j~ and X~i~ and X~k~ are non-adjacent, we can orient X~j~ - X~k~ to X~j~ -> X~k~. Likewise, we can orientate the edge as below.
+
+
+![](IMG_A35968D55CBA-4.jpeg)
+
+### Implementation:
+
+```{r}
+# Remove the column named "class"
+brcaDataQ1 <- brcaData[, !names(brcaData) %in% "class"]
+
+# Get number of rows and list of column names
+n <- nrow(brcaDataQ1)
+V <- colnames(brcaDataQ1)
+```
+
+`pc.fit` variable will store the result of running the PC algorithm, which identifies the structure of a causal graph, where nodes (representing variables or genes) are connected by edges if there’s a direct relationship between them. `C` is the correlation matrix of the gene expression data (brcaDataQ1). It shows how strongly the expression of each gene is related to the others. `gaussCItest` is used to determine if two genes are conditionally independent given a set of other genes.
+
+```{r}
+# Estimate CPDAG
+pc.fit <- pc(suffStat = list(C = cor(brcaDataQ1), n = n),
+indepTest = gaussCItest, alpha=0.01, labels = V)
+
+if (require(Rgraphviz)) {
+  # Plot the estimated CPDAG with customized node attributes
+  plot(pc.fit, main = "Estimated CPDAG - Gene Regulatory Network")
+}
+```
+
+## Question 2
+
+EBF1 is an important gene that is involved in many biological processes leading to
+cancer. Find the top 10 other genes that have strong causal effects on EBF1 using a
+causal inference algorithm.
+
+## Answer:
+
+idaFast (Intervention Discalculation Algorithm - Fast) is a method used to estimate the causal effects of variables on a target variable based on observational data. The goal of idaFast is to estimate the causal effects of multiple variables (genes, in gene expression data) on a given target variable. 
+
+Before idaFast can be applied, the PC algorithm (Peter-Clark algorithm) is often used to generate a graphical model from the data. This graphical model is a Directed Acyclic Graph (DAG) where the nodes represent variables (genes) and the edges represent potential causal relationships between them.
+
+To estimate causal effects, idaFast makes use of the covariance matrix of the data, which represents how the different variables in the dataset vary together. The covariance matrix is essential for calculating causal effects in linear Gaussian models.
+
+In observational data, we cannot directly intervene on the variables. However, idaFast simulates interventions by estimating how a change in one variable would propagate through the causal network (DAG) and affect other variables. This helps estimate the causal effect of each variable on the target. idaFast considers all possible paths and returns the causal effect (or another measure of choice) for each variable on the target EBF1 for this question. We can see the top ten genes that have strong causal effects on EBF1 below.
+
+```{r}
+# Assigning same dataset in Q1 to Q2
+brcaDataQ2 <- brcaDataQ1
+
+# Specify the target gene
+targetGene <- "EBF1"
+
+# Identify the position of the EBF1 gene
+targetGeneIndex <- which(colnames(brcaDataQ2) == "EBF1")
+
+# Exclude the EBF1 column for calculating causal effects
+reqIndices <- setdiff(1:ncol(brcaDataQ2), targetGeneIndex)
+
+# Calculate the causal effects of all genes on EBF1
+causalEffects <- sapply(reqIndices, function(gene) {
+  effects <- idaFast(gene, targetGeneIndex, cov(brcaDataQ2), pc.fit@graph)
+  # Take the minimum of the absolute values of the causal effects
+  min(abs(effects))
+})
+
+# Convert to named vector with gene names for clarity
+names(causalEffects) <- colnames(brcaDataQ2)[reqIndices]
+
+# Rank genes by the absolute value of the causal effects and select the top 10
+topTenGenes <- sort(causalEffects, decreasing = TRUE)[1:10]
+topTenGenes
+```
+
+## Question 3
+
+Use a local causal structure learning algorithm to find genes in the Markov blanket of
+ABCA9 from data. Explain how the algorithm works. 
+
+## Answer:
+
+HITON-PC is a local causal structure learning algorithm designed to efficiently discover the Markov blanket (MB) of a target variable. The Markov blanket of a target variable T is the smallest set of variables that makes T conditionally independent of all other variables in the dataset. The MB typically consists of:
+**Parents:** Variables that directly influence the target.
+**Children:** Variables that are directly influenced by the target.
+**Spouses:** Parents of the target's children (other variables that indirectly influence the target via a child).
+
+The goal is to identify the MB of a target variable T efficiently. Finding the MB is important because it is the minimal set of variables required to predict T without needing the rest of the variables. HITON-PC builds on the PC algorithm, which is a constraint-based causal discovery method that finds conditional independencies between variables using conditional independence tests (e.g., using partial correlations or mutual information).
+
+Input: X = **{Gene A, Gene B, Gene C, Gene D}**, Z = **Gene Z**
+
+Output: **PC**, the subset of X that comprises the parents and children of Z
+
+We have a dataset of genes, and we want to find out which genes (let's call them X genes) are direct causes or effects (parents and children) of a particular gene of interest, say Gene Z.
+
+**Step 1: Initialization:**
+
+**PC = ∅**: Initially, the set of parents and children (PC) of Gene Z is empty. **OPEN:** All the genes in the dataset except Gene Z are placed in an **OPEN** list, which contains potential candidate genes for the PC set. These genes are sorted in descending order based on how strongly they are associated with Gene Z (e.g., through correlation or mutual information). Suppose the genes are initially ordered in the OPEN list based on their correlation with Gene Z: {GeneA,GeneB,GeneC,GeneD}.
+    
+**Step 2: Main Loop (Finding Candidate Parents/Children):**
+
+**While OPEN ≠ ∅:** As long as the OPEN list is not empty, we continue the process.
+
+**Remove Gene A:** It is the most strongly associated with Gene Z, so we remove it from OPEN and add it to PC. We test if **Gene A** is conditionally independent of Gene Z given subsets of the PC set (which is empty at this point). If it is not independent, we keep it in PC.
+
+**Remove Gene B:** Next, we remove **Gene B** from OPEN and test if it is conditionally independent of **Gene Z** given any genes in the PC set (which currently has **Gene A**). If **Gene B** is not independent, we add it to PC.
+    
+**Step 3: Second Loop (Refining the PC Set):**
+
+After we go through the OPEN list and identify some potential parents and children, we perform a second loop over the PC set to refine it. **For each gene in PC**, we again test whether it is conditionally independent of Gene Z given subsets of the other genes in PC that were added before it. This ensures that we remove any genes that may have been incorrectly added to PC in the first pass.
+    
+**Step 4: Output:**
+
+After performing the tests, the remaining genes in PC are the direct parents or children of Gene Z. In this case, suppose the final **PC set** is {GeneA,GeneC}, which means that Gene A and Gene C are either direct causes or direct effects of Gene Z.
+
+
+### Implementation:
+
+*learn.nbr* function learns the neighborhood of the gene ABCA9. The neighborhood refers to the set of variables (or genes) that are directly connected to the target, either as causes or effects. An *alpha of 0.01* means that a relationship between genes will only be considered significant if the probability of it occurring by random chance is less than 1%. The below genes are the parents and children of ABCA9.
+
+```{r}
+# Assigning same dataset in Q1 to Q3
+brcaDataQ3 <- brcaDataQ1
+
+#  Learn the parents and children set of ABCA9
+HITON.PC.ABCA9 <- learn.nbr(brcaDataQ3, "ABCA9", method = "si.hiton.pc", alpha = 0.01)
+HITON.PC.ABCA9
+```
+
+*learn.mb* function is used to learn the Markov Blanket of ABCA9. The Markov Blanket consists of the most important genes that directly influence or are influenced by the target gene. *IAMB* is an algorithm that incrementally adds variables (genes) to the Markov Blanket of the target gene based on their statistical association with the target. Below includes the parents and children from the step but adds the spouses of ABCA9 as well.
+
+```{r}
+# Learn the markov blanket
+MB.ABCA9=learn.mb(brcaDataQ3, "ABCA9", method="iamb", alpha=0.01)
+MB.ABCA9
+```
+
+Discretise the dataset to binary using the average expression of ALL genes as the threshold.
+
+```{r}
+# Finding average expression of ALL genes
+averageGeneExpression <- mean(as.matrix(brcaDataQ1))
+
+# Discretize the data
+brcaDataBinary <- as.data.frame(ifelse(as.matrix(brcaDataQ1) >= averageGeneExpression, 1, 0))
+
+head(brcaDataBinary)
+```
+
+## Question 4
+
+Use PC-simple algorithm (pcSelect) to find the parent and children set of the class
+variable. Explain how PC-simple works.
+
+Evaluate the accuracy of the Naïve Bayes classification on the dataset in the following
+cases:
+a) Use all features (genes) in the dataset
+b) Use only the features (genes) in the parent and children set of the class
+variable
+
+Compare the accuracy of the models in the two cases using 10-fold cross validation. 
+
+## Answer:
+
+The **PC-simple algorithm** is used to identify the set of parents and children (PC) of a target variable Z, given a dataset with a set of predictor variables {X~1~, X~2~, ….., X~m~}.
+
+Input: **Predictor variables (`X~1~, X~2~, ..., X~m~`)** and **Gene~Z~**
+
+Output: **PC**, the subset with parents and children of Z
+
+**Step 1: Initialization**
+
+Start with k = 0, representing the current level of conditional independence testing. Set PC^k^ = { X~1~, X~2~, …., X~m~ }, initially including all genes except the target Gene~Z~.
+
+**Step 2: Iterative Pruning of Independent Genes**
+
+The algorithm proceeds by testing conditional independence between each gene X in {PC}^{k-1}^ and the target gene `Z` given smaller subsets of the other genes in {PC}^{k-1}^. For each gene X and each subset S of size |S| = k - 1 from the remaining genes, the algorithm performs a conditional independence test.
+
+**Step 3: Testing Conditional Independence**
+
+If gene X and target gene Z are found to be conditionally **independent** given a subset S, it implies that X is **not** directly associated with `Z` (i.e., it is neither a parent nor a child of `Z`). In this case, X is removed from the current PC set. After the first iteration, Gene~3~ may be removed because it is found to be independent of Gene~1~ given Gene~2~. In the next iteration, Gene~4~ may be removed because it is independent of Gene~1~ given a subset of the remaining genes.
+
+**Step 4: Incremental Updates**
+
+Increase k by 1 and repeat the process of testing conditional independence for higher-order subsets. At each step, the size of the conditioning subsets increases, allowing the algorithm to capture more complex dependencies between the genes.
+
+**Step 5: Termination**
+
+The algorithm stops when no more variables can be pruned, meaning that for all genes in the current PC set, none can be conditionally independent of the target gene `Z` given any subset of the remaining genes. The output is the final PC set {PC}^k^, which consists of genes that are either direct **parents** or **children** of the target gene `Z`.
+
+### Implementation:
+
+The pcSelect function is used to find which genes are most important for predicting the class variable (`brcaDataBinary$Class`). `brcaDataBinary$Class` specifies the target variable (in this case, the cancer classification). `brcaDataQ4` is the gene expression data (the predictor matrix), where each column is a gene, and each row is a sample. Below are the genes that are either directly influencing the class or are influenced by the class.
+
+```{r}
+# Ensure the class variable is converted to a numeric binary variable (1 for "C", 0 for "N")
+brcaDataBinary$Class <- ifelse(brcaData$class == "C", 1, 0)
+
+# Exclude the class column for the predictor data matrix
+brcaDataQ4  <- brcaDataBinary[, -which(names(brcaDataBinary) == "Class")]
+
+# Set up the sufficient statistics using the correlation matrix of the numeric data
+suffStat <- list(C = cor(brcaDataQ4), n = nrow(brcaDataQ4))
+
+# Use the class as the target variable and the gene expression data as the predictor matrix
+pcSelResults <- pcSelect(y = brcaDataBinary$Class, dm = brcaDataQ4, alpha = 0.01)
+
+# Display the results
+pcSelResults
+```
+
+Next, extraction of parent and children set of the class variable is done.
+
+```{r}
+
+# Initialize an empty list to store the results
+allPCFeatures <- list()
+
+# Iterate from 1 to 10
+for (i in 1:length(pcSelResults$G)) {
+  # Check if index i is within the range of the vector length
+  if (i <= length(pcSelResults$G)) {
+    # Extract the logical value at index i
+    selectedLogical <- pcSelResults$G[i]
+    
+    # Extract the names and TRUE values if applicable
+    if (selectedLogical) {
+      featureName <- names(pcSelResults$G)[i]
+      allPCFeatures[[featureName]] <- TRUE
+    }
+  }
+}
+
+# Extract the names of the features that are TRUE
+truePCNames <- c(names(allPCFeatures), "Class")
+
+# Extract the columns from binary_data using true_feature_names
+PCData <- brcaDataBinary[, truePCNames]
+PCData$Class <- brcaDataBinary$Class
+
+# Print the first few rows of the extracted data to verify
+head(PCData)
+```
+
+```{r}
+
+# Factorising the Class column to 2 levels
+brcaDataBinary$Class <- factor(brcaDataBinary$Class)
+PCData$Class <- factor(PCData$Class)
+
+### Case A: Using All Features
+
+# Set up 10-fold cross-validation on the training set
+trainOnControl <- trainControl(method = "cv", number = 10)
+
+# Train Naive Bayes classifier using all features with 10-fold cross-validation on training set
+modelAllGenes <- suppressWarnings(train(Class ~ ., 
+                      data = brcaDataBinary, 
+                      method = "nb",  # Naive Bayes
+                      trControl = trainOnControl))
+
+# Get the cross-validation accuracy from the training set
+accuracyAllGenes <- modelAllGenes$results$Accuracy
+print(paste("Cross-validation accuracy using all features:", accuracyAllGenes[2])) 
+```
+
+```{r}
+### Case B: Using Parent and Children Features
+
+# Train Naive Bayes classifier with 10-fold cross-validation on training set (parent and children features)
+modelPCCv <- suppressWarnings(train(Class ~ ., 
+                     data = PCData, 
+                     method = "nb",  # Naive Bayes
+                     trControl = trainOnControl))
+
+# Get the cross-validation accuracy from the training set
+accuracyPCCv <- modelPCCv$results$Accuracy
+print(paste("Cross-validation accuracy using parent and children features:", accuracyPCCv[2]))
+
+```
+
+
+**Model with All Features:**
+
+The accuracy achieved by the Naive Bayes model when using all features from the dataset is **0.9768 (about 97.6%)**. This means that the model correctly predicted the class label of the test data in 97.6% of the cases. This model uses every feature available in the dataset to make predictions.
+
+
+**Model with Parent and Children Features:**
+
+The accuracy achieved by the Naive Bayes model when using only the parent and children features (the key variables most directly associated with the target variable) is **0.9843 (about 98.4%)**. This shows that the model can predict class labels slightly better using only these important variables, improving accuracy by about 1% compared to using all features.
+
+
+## Question 5(a)
+
+Construct the conditional probability tables for the Bayesian network based on data.
+
+## Answer
+
+To construct probability tables, also known as conditional probability tables (CPTs), the goal is to summarize the probabilities of different outcomes for a variable based on the data. Create a contingency table for the variable. A contingency table simply counts the frequency of each unique value (or combination of values in the case of conditional probabilities) for the variable.Find the total number of observations (e.g., number of rows in the dataset). For each level or value of the variable, calculate its probability by dividing the count for that level by the total number of observations. This gives the likelihood of each outcome for the variable. Use the calculated probabilities and levels to construct the probability table. 
+
+```{r}
+
+# Select specific columns by name
+brcaDataQ5 <- brcaDataBinary[, c("BTNL9", "CD300LG", "Class", "IGSF10", "ABCA9")]
+
+# Create a contingency table for BTNL9
+counts <- table(brcaDataQ5$BTNL9)
+
+# Calculate total number of observations
+n <- sum(counts)
+
+# Calculate probabilities for each level of BTNL9
+prob_0 <- counts["0"] / n
+prob_1 <- counts["1"] / n
+
+# Define levels for BTNL9
+levels <- c("0", "1")
+
+# Create the CPT
+a <- cptable(~BTNL9, 
+               values = c(prob_0, prob_1),
+               levels = levels)
+
+# Get the contingency table
+counts <- table(brcaDataQ5$BTNL9, brcaDataQ5$CD300LG)
+
+# Calculate probabilities
+prob_00 <- counts[1, 1] / n
+prob_01 <- counts[1, 2] / n
+prob_10 <- counts[2, 1] / n
+prob_11 <- counts[2, 2] / n
+
+
+# Create the CPT
+b.a <- cptable(~CD300LG | BTNL9, 
+               values = c(prob_00, prob_01, prob_10, prob_11),
+               levels = levels)
+
+# Get the contingency table
+counts <- table(brcaDataQ5$CD300LG, brcaDataQ5$Class)
+
+# Calculate probabilities
+prob_00 <- counts[1, 1] / n
+prob_01 <- counts[1, 2] / n
+prob_10 <- counts[2, 1] / n
+prob_11 <- counts[2, 2] / n
+
+c.b <- cptable(~ Class|CD300LG, 
+               values = c(prob_00, prob_01, prob_10, prob_11),
+               levels = levels)
+
+# Get the contingency table
+counts <- table(brcaDataQ5$Class, brcaDataQ5$IGSF10)
+
+# Calculate probabilities
+prob_00 <- counts[1, 1] / n
+prob_01 <- counts[1, 2] / n
+prob_10 <- counts[2, 1] / n
+prob_11 <- counts[2, 2] / n
+
+d.c <- cptable(~ IGSF10|Class, 
+               values = c(prob_00, prob_01, prob_10, prob_11),
+               levels = levels)
+
+# Create contingency tables
+table_000 <- table(brcaDataQ5$ABCA9[brcaDataQ5$IGSF10 == 0 & brcaDataQ5$BTNL9 == 0])
+table_010 <- table(brcaDataQ5$ABCA9[brcaDataQ5$IGSF10 == 1 & brcaDataQ5$BTNL9 == 0])
+table_001 <- table(brcaDataQ5$ABCA9[brcaDataQ5$IGSF10 == 0 & brcaDataQ5$BTNL9 == 1])
+table_011 <- table(brcaDataQ5$ABCA9[brcaDataQ5$IGSF10 == 1 & brcaDataQ5$BTNL9 == 1])
+
+# Calculate probabilities
+n_000 <- sum(table_000)
+n_010 <- sum(table_010)
+n_001 <- sum(table_001)
+n_011 <- sum(table_011)
+
+prob_000 <- c(table_000[1] / n_000, table_000[2] / n_000)
+prob_010 <- c(table_010[1] / n_010, table_010[2] / n_010)
+prob_001 <- c(table_001[1] / n_001, table_001[2] / n_001)
+prob_011 <- c(table_011[1] / n_011, table_011[2] / n_011)
+
+# Combine probabilities into a vector
+prob_values <- c(prob_000, prob_010, prob_001, prob_011)
+
+# Create the CPT
+e.da <- cptable(~ABCA9 | IGSF10:BTNL9, 
+               values = prob_values,
+               levels = levels)
+
+plist <- compileCPT(list(a, b.a, c.b, d.c, e.da))
+plist
+```
+
+
+```{r}
+# Draw the undirected network
+net1=grain(plist)
+plot(net1) 
+```
+
+```{r}
+# Draw the directed network
+plot(net1$dag) 
+```
+
+### Conditional Probability Table P(BTNL9)
+
+```{r}
+# Table 1:
+# BTNL9 P(BTNL9)
+plist$BTNL9
+```
+
+### Conditional Probability Table P(CD300LG|BTNL9)
+
+```{r}
+# Table 2:
+# BTNL9 CD300LG P(CD300LG|BTNL9)
+plist$CD300LG
+```
+### Conditional Probability Table P(Class|CD300LG)
+
+```{r}
+# Table 3:
+# CD300LG Class P(Class|CD300LG)
+plist$Class
+```
+
+### Conditional Probability Table P(IGSF10|Class)
+
+```{r}
+# Table 4:
+# BinaryClass IGSF10 P(IGSF10|Class)
+plist$IGSF10
+```
+### Conditional Probability Table P(ABC9|IGSF10,BTNL9)
+
+```{r}
+# Table 5:
+# BTNL9 IGSF10 P(ABC9|IGSF10,BTNL9)
+plist$ABCA9
+```
+
+## Question 5(b)
+
+Estimate the probability of the four genes in the network having high expression
+levels.
+
+## Answer
+
+A joint probability refers to the probability of multiple events happening simultaneously. In this case, the query involves computing the probability that four genes (BTNL9, CD300LG, IGSF10, and ABCA9) all have a high expression level. The joint probability is expressed as P(BTNL9 = high, CD300LG = high, IGSF10 = high, ABCA9 = high). The querygrain() function is used to query the **joint probability** for the genes BTNL9, CD300LG, IGSF10, and ABCA9. The type of query is set to "joint", indicating that the goal is to compute the joint probability for these four variables being in specific states.
+
+The index ["1", "1", "1", "1"] refers to the event where each of the four genes (BTNL9, CD300LG, IGSF10, and ABCA9) is in the high expression state (1). Below is the probability of the four genes in the network having high expression levels.
+
+
+```{r}
+# Query the joint probability of all expressions high
+allGenesHigh <- querygrain(net1, nodes=c("BTNL9", "CD300LG", "IGSF10", "ABCA9"), type="joint")
+
+#cSet evidence: BTNL9 = high, CD300LG = high, IGSF10 = high, ABCA9 = high
+PAllYes <- allGenesHigh["1", "1", "1", "1"]
+PAllYes
+```
+
+There is only a probability of **7%** for all the four genes in the network to have high expression
+levels.
+
+## Question 5(c)
+
+Estimate the probability of having cancer when the expression level of CD300LG
+is high and the expression level of BTNL9 is low.
+
+## Answer
+
+This code helps us estimate the probability of having cancer based on the expression levels of two genes: CD300LG and BTNL9. 
+
+CD300LG is highly expressed (set to "1").
+BTNL9 is lowly expressed (set to "0").
+This information is called evidence, which means we are fixing these genes to certain values and asking the system to calculate the cancer probability based on these conditions. Below is the probability of having cancer when the expression level of CD300LG
+is high and the expression level of BTNL9 is low
+
+
+```{r}
+# Set evidence: CD300LG = high, BTNL9 = low
+evidence <- setEvidence(net1, evidence = list(CD300LG = "1", BTNL9 = "0"))
+
+# Query the conditional probability of having cancer
+queryResult <- querygrain(evidence, nodes = "Class", type = "marginal")
+
+# Extract and print the probability of having cancer
+cancerProb <- queryResult$Class["1"]
+cancerProb
+```
+
+
+The probability of having cancer when the expression level of CD300LG is high and the expression level of BTNL9 is low is **25%**.
+
+## Question 5(d)
+
+Prove the result in c) mathematically.
+
+## Answer
+![](IMG_178B2486A44B-1.jpeg)
+
+
+![](IMG_26956B2A2050-1.jpeg)
+
+
+## Question 5(e)
+
+Given we know the value of CD300LG, is the “class” conditionally independent
+of ABCA9? And why?
+
+## Answer
+
+Yes, due to the **Markov condition**.
+
+The Markov condition is a fundamental concept in probabilistic graphical models, particularly in Bayesian networks. It states that in a directed acyclic graph (DAG), a variable is conditionally independent of its non-descendants given its parents. This means that once we know the value of a variable's direct causes (its parent nodes), it becomes independent of any other variables that are not directly influenced by it (its non-descendants).
+
+In this question,
+
+**class** depends on **CD300LG**.
+
+**CD300LG** is influenced by **BTNL9**.
+
+**ABCA9** is also influenced by **BTNL9**.
+
+Applying the Markov Condition, **class** is only directly influenced by **CD300LG** and not by **BTNL9** or **ABCA9**. According to the Markov condition, **class** should be conditionally independent of any variable that is not its descendant, given its parent (**CD300LG**). **ABCA9** is also indirectly influenced by **BTNL9**, but it is not directly related to **class**.
+
+Therefore, **class** is conditionally independent of **ABCA9**.
+
+
+
+
